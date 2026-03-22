@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import axios from 'axios';
-import { PDFViewer } from '@react-pdf/renderer';
+import { PDFViewer, PDFDownloadLink } from '@react-pdf/renderer';
 import FormPDF from './FormPDF'; 
 import './App.css'; 
 
@@ -115,11 +115,31 @@ function App() {
               ))}
             </tbody>
           </table>
+          <PDFDownloadLink
+            document={<FormPDF data={data} />}
+            fileName="บันทึกข้อความ_จัดซื้อวัสดุ.pdf"
+            style={{
+              textDecoration: 'none',
+              padding: '12px 25px',
+              color: '#fff',
+              backgroundColor: '#2e7d32',
+              border: 'none',
+              borderRadius: '5px',
+              fontSize: '18px',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+              display: 'inline-block', 
+              marginTop: '40px'    
+            }}
+          >
+            {({ loading }) => (loading ? '⏳ กำลังเตรียมไฟล์...' : '📥 ดาวน์โหลดไฟล์ PDF (Export)')}
+          </PDFDownloadLink>
         </div>
       )}
 
       {data.length > 0 && !loading && (
-        <div style={{ height: '800px', border: '2px solid #555' }}>
+        <div style={{ height: '1200px', border: '2px solid #555', marginBottom:"100px" }}>
           <PDFViewer width="100%" height="100%">
             <FormPDF data={data} />
           </PDFViewer>
