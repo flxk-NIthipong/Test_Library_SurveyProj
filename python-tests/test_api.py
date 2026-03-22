@@ -16,7 +16,6 @@ async def upload_file(file: UploadFile = File(...)):
     print(f"📥 มีไฟล์ส่งเข้ามา: {file_name}")
 
     # 2. จำลองการบันทึกไฟล์นั้นลงในเครื่องเซิร์ฟเวอร์ชั่วคราว (เพื่อรอเอาไปสกัดข้อมูล)
-    # สมมติเราเซฟชื่อว่า 'temp_uploaded_file' บวกด้วยนามสกุลเดิม
     extension = file_name.split(".")[-1]
     temp_file_path = f"temp_uploaded_file.{extension}"
     

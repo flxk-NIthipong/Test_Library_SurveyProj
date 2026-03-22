@@ -11,7 +11,7 @@ API_KEY = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=API_KEY)
 
 print("="*75)
-print("🚀 เริ่มต้นทดสอบ Gemini API (อัปเกรดใช้ Library google-genai ตัวล่าสุด)")
+print("🚀 เริ่มต้นทดสอบ Gemini API")
 print("="*75)
 
 image_path = "../MockData/picture_without_table.jpg"
@@ -51,7 +51,7 @@ try:
         print(f"   {item}")
 
 except FileNotFoundError:
-    print(f"❌ Error: หาไฟล์รูปภาพ '{image_path}' ไม่เจอครับ")
+    print(f"❌ Error: หาไฟล์รูปภาพ '{image_path}' ไม่เจอ")
 except Exception as e:
     print(f"❌ Error: เกิดข้อผิดพลาด -> {e}")
 

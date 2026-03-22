@@ -1,176 +1,174 @@
 import os
-import shutil
-import re
+import io
 import json
+import re 
 import pandas as pd
 import docx
+import google.generativeai as genai
 from fastapi import FastAPI, File, UploadFile
-from google import genai
-from google.genai import types
-from PIL import Image
-from dotenv import load_dotenv
+from fastapi.middleware.cors import CORSMiddleware
+from thefuzz import process
+import PIL.Image
 
-# ==========================================
-# 1. ตั้งค่าระบบและโหลด API Key
-# ==========================================
-load_dotenv() # ดึง.env
-API_KEY = os.getenv("GEMINI_API_KEY")
-client = genai.Client(api_key=API_KEY)
+# =================================================================
+# 🔑 1. ตั้งค่า Gemini API
+# =================================================================
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY")) # หรือใส่ API Key 
 
 app = FastAPI()
 
-print("="*75)
-print("🚀 เริ่มต้นเซิร์ฟเวอร์ FastAPI (All-in-One: Excel, Word, Image)")
-print("="*75)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# ==========================================
-# 2. ฟังก์ชันช่วยสกัดตัวเลขและหน่วย (สำหรับ Excel/Word)
-# ==========================================
-def extract_value_and_unit(text):
-    if pd.isna(text) or text is None or str(text).strip() == "":
-        return None, None
-    
-    text = str(text).strip()
-    match = re.match(r'([\d\.,]+)\s*(.*)', text)
-    
-    if match:
-        num_str = match.group(1).replace(',', '')
-        try:
-            num = float(num_str)
-            if num.is_integer(): num = int(num)
-        except ValueError:
-            num = None
-            
-        unit = match.group(2).strip()
-        if not unit: unit = None
-        return num, unit
-    else:
-        return None, None
+# =================================================================
+# 🗄️ 2. ฐานข้อมูลวัสดุมาตรฐาน (แก้คำผิด)
+# =================================================================
+STANDARD_MATERIALS = [
+    "สายไฟ VAF 2x2.5", "สกรูเกลียวปล่อย หัว F เบอร์ 7 ยาว 2 นิ้ว", "ท่อ PVC 2 นิ้ว ชั้น 8.5",
+    "เทปพันสายไฟ 3M", "สีทาบ้าน สีขาว", "หลอดไฟ LED 18W", "ปูนซีเมนต์ผสม ตราเสือ",
+    "กระดาษทรายขัดไม้ เบอร์ 1", "ถุงมือผ้าเคลือบยาง", "ค้อนหงอนด้ามไฟเบอร์", "น็อตตัวเมีย M8",
+    "ซิลิโคนใส กันน้ำ", "ใบตัดเหล็ก 4 นิ้ว", "สายยางรดน้ำ 5 หุน", "กาวลาเท็กซ์ TOA", "แปรงทาสี 2 นิ้ว"
+]
 
-# ==========================================
-# 3. Endpoint หลักสำหรับรับไฟล์
-# ==========================================
+# =================================================================
+# 📥 3. API สำหรับรับไฟล์และสกัดข้อมูล
+# =================================================================
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...)):
-    file_name = file.filename
-    extension = file_name.split(".")[-1].lower()
-    temp_file_path = f"temp_uploaded_file.{extension}"
-    
-    print(f"\n📥 ได้รับไฟล์: {file_name} (ประเภท: {extension})")
-
-    # บันทึกไฟล์ชั่วคราวลงเครื่อง
-    with open(temp_file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    extracted_data = []
-
     try:
-        # 🟢 กรณีที่ 1: ไฟล์ Excel (Pandas)
-        if extension in ["xlsx", "xls"]:
+        filename = file.filename.lower()
+        content = await file.read()
+        extracted_data = []
+
+        print(f"\n📥 ได้รับไฟล์: {filename}")
+
+        # ---------------------------------------------------------
+        # 🟢 กรณีที่ 1: ไฟล์ Excel
+        # ---------------------------------------------------------
+        if filename.endswith(('.xlsx', '.xls')):
             print("⚙️ กำลังประมวลผลด้วย Pandas...")
-            df = pd.read_excel(temp_file_path)
+            df = pd.read_excel(io.BytesIO(content))
+            df = df.astype(object).where(pd.notnull(df), None) 
+            raw_data = df.to_dict(orient="records")
             
-            if 'ชื่อวัสดุ' in df.columns:
-                df['ชื่อวัสดุ'] = df['ชื่อวัสดุ'].astype(str).str.strip()
-                df.loc[df['ชื่อวัสดุ'] == 'nan', 'ชื่อวัสดุ'] = None
+            # 🌟 แปลงโครงสร้างและดึงคอลัมน์ "ราคาประมาณ" 
+            for row in raw_data:
+                item = {
+                    "ลำดับ": row.get("ลำดับ"),
+                    "ชื่อวัสดุ": row.get("ชื่อวัสดุ"),
+                    "จำนวน": row.get("จำนวน"), 
+                    "หน่วยนับ": None,
+                    "ราคา": row.get("ราคาประมาณ") or row.get("ราคา"), 
+                    "หน่วยเงิน": None
+                }
+                extracted_data.append(item)
 
-            if 'จำนวน' in df.columns:
-                extracted_qty = df['จำนวน'].apply(extract_value_and_unit)
-                df['จำนวน'] = [res[0] for res in extracted_qty]
-                df['หน่วยนับ'] = [res[1] for res in extracted_qty]
-
-            if 'ราคาประมาณ' in df.columns:
-                extracted_price = df['ราคาประมาณ'].apply(extract_value_and_unit)
-                df['ราคา'] = [res[0] for res in extracted_price]
-                df['หน่วยเงิน'] = [res[1] for res in extracted_price]
-                df = df.drop(columns=['ราคาประมาณ'])
-
-            cols_order = ['ลำดับ', 'ชื่อวัสดุ', 'จำนวน', 'หน่วยนับ', 'ราคา', 'หน่วยเงิน']
-            df = df[[c for c in cols_order if c in df.columns]]
-            df = df.astype(object).where(pd.notnull(df), None)
-            extracted_data = df.to_dict(orient="records")
-
-        # 🔵 กรณีที่ 2: ไฟล์ Word (python-docx)
-        elif extension in ["docx"]:
+        # ---------------------------------------------------------
+        # 🔵 กรณีที่ 2: ไฟล์ Word
+        # ---------------------------------------------------------
+        elif filename.endswith('.docx'):
             print("⚙️ กำลังประมวลผลด้วย python-docx...")
-            doc = docx.Document(temp_file_path)
-            if len(doc.tables) > 0:
-                table = doc.tables[0] # สมมติว่าดึงจากตารางแรก
-                headers = [cell.text.strip() for cell in table.rows[0].cells]
-                
-                for row in table.rows[1:]:
-                    row_data = [cell.text.strip() for cell in row.cells]
-                    if all(data == "" for data in row_data): continue
-                    
-                    row_dict = {}
-                    for i in range(len(headers)):
-                        key = headers[i] if i < len(headers) and headers[i] else f"Column_{i+1}"
-                        val = row_data[i] if i < len(row_data) and row_data[i] else None
-                        row_dict[key] = val
+            doc = docx.Document(io.BytesIO(content))
+            
+            if doc.tables:
+                table = doc.tables[0]
+                num_cols = len(table.rows[0].cells)
+                for row in table.rows[1:]: 
+                    cells = [cell.text.strip() for cell in row.cells]
+                    if num_cols == 5:
+                        row_data = {
+                            "ลำดับ": cells[0], "ชื่อวัสดุ": cells[1], "จำนวน": cells[2],
+                            "หน่วยนับ": None, "ราคา": cells[3], "หน่วยเงิน": None
+                        }
+                    else:
+                        keys = ['ลำดับ', 'ชื่อวัสดุ', 'จำนวน', 'หน่วยนับ', 'ราคา', 'หน่วยเงิน']
+                        row_data = {keys[i]: (cells[i] if i < len(cells) else None) for i in range(len(keys))}
+                    extracted_data.append(row_data)
 
-                    if 'จำนวน' in row_dict:
-                        qty_val, qty_unit = extract_value_and_unit(row_dict.get('จำนวน'))
-                        row_dict['จำนวน'] = qty_val
-                        row_dict['หน่วยนับ'] = qty_unit
-
-                    price_key = 'ราคา' if 'ราคา' in row_dict else ('ราคาประมาณ' if 'ราคาประมาณ' in row_dict else None)
-                    if price_key:
-                        price_val, price_unit = extract_value_and_unit(row_dict.get(price_key))
-                        row_dict['ราคา'] = price_val
-                        row_dict['หน่วยเงิน'] = price_unit
-                        if price_key != 'ราคา': del row_dict[price_key]
-
-                    ordered_dict = {
-                        'ลำดับ': row_dict.get('ลำดับ'),
-                        'ชื่อวัสดุ': row_dict.get('ชื่อวัสดุ'),
-                        'จำนวน': row_dict.get('จำนวน'),
-                        'หน่วยนับ': row_dict.get('หน่วยนับ'),
-                        'ราคา': row_dict.get('ราคา'),
-                        'หน่วยเงิน': row_dict.get('หน่วยเงิน')
-                    }
-                    extracted_data.append(ordered_dict)
-
-        # 🟠 กรณีที่ 3: ไฟล์รูปภาพ (Gemini Vision API)
-        elif extension in ["jpg", "jpeg", "png"]:
-            print("⚙️ กำลังประมวลผลด้วย Gemini API...")
-            img = Image.open(temp_file_path)
+        # ---------------------------------------------------------
+        # 🟠 กรณีที่ 3: รูปภาพ (Gemini)
+        # ---------------------------------------------------------
+        elif filename.endswith(('.png', '.jpg', '.jpeg')):
+            print("⚙️ กำลังส่งรูปภาพให้ Gemini API อ่าน...")
+            image = PIL.Image.open(io.BytesIO(content))
+            model = genai.GenerativeModel('gemini-2.5-flash')
+            
             prompt = """
-            กรุณาดึงข้อมูลรายการวัสดุจากรูปภาพนี้ แล้วแปลงเป็น JSON Array 
-            โดยแต่ละรายการต้องมี Key และ Data Type ดังต่อไปนี้เป๊ะๆ:
-            - "ลำดับ" (Number)
-            - "ชื่อวัสดุ" (String)
-            - "จำนวน" (Number หรือ null ถ้าไม่มีข้อมูล)
-            - "หน่วยนับ" (String หรือ null ถ้าไม่มีข้อมูล)
-            - "ราคา" (Number หรือ null ถ้าไม่มีข้อมูล)
-            - "หน่วยเงิน" (String หรือ null ถ้าไม่มีข้อมูล)
+            คุณคือ AI ผู้เชี่ยวชาญด้านการอ่านบิลและใบเสนอราคา
+            กรุณาอ่านข้อมูลจากรูปภาพนี้ แล้วสกัดข้อมูลวัสดุทั้งหมดออกมาในรูปแบบ JSON Array
+            โดยแต่ละรายการต้องมี Key ภาษาไทยดังนี้: "ลำดับ", "ชื่อวัสดุ", "จำนวน", "หน่วยนับ", "ราคา", "หน่วยเงิน"
+            (ถ้าช่องไหนไม่มีข้อมูล ให้ใส่ค่าเป็น null)
+            ส่งกลับมาแค่โครงสร้าง JSON เท่านั้น ห้ามพิมพ์คำอธิบายอื่นเพิ่มเติมเด็ดขาด
             """
-            response = client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=[prompt, img],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.1
-                )
-            )
-            extracted_data = json.loads(response.text)
+            response = model.generate_content([prompt, image])
+            json_str = response.text.replace("```json", "").replace("```", "").strip()
+            extracted_data = json.loads(json_str)
 
         else:
-            return {"status": "error", "message": "ไม่รองรับไฟล์ประเภทนี้ครับ"}
+            return {"status": "error", "message": "รองรับเฉพาะไฟล์ Excel, Word และ รูปภาพ เท่านั้น"}
+
+        # =================================================================
+        # 🌟 4. ทำความสะอาดข้อมูล: แยกจำนวน/หน่วยนับ, แยกราคา/หน่วยเงิน และแก้คำผิด
+        # =================================================================
+        print("🔍 กำลังทำความสะอาดข้อมูล...")
+        
+        for item in extracted_data:
+            # --- 1. แยกจำนวนกับหน่วยนับ ---
+            raw_qty = str(item.get("จำนวน") or "").strip()
+            if raw_qty and raw_qty.lower() not in ["none", "nan", "-"]:
+                match = re.match(r"^([\d\.]+)\s*(.*)$", raw_qty)
+                if match:
+                    item["จำนวน"] = match.group(1).strip()
+                    if match.group(2) and not item.get("หน่วยนับ"):
+                        item["หน่วยนับ"] = match.group(2).strip()
+
+            # --- 2. 🌟 แยกราคาและหน่วยเงิน (สับตัวเลขออกจากข้อความ) ---
+            raw_price = str(item.get("ราคา") or "").strip()
+            raw_price = raw_price.replace(",", "") # ลบคอมมาออก (เช่น "1,200 บ." -> "1200 บ.")
+            
+            if raw_price and raw_price.lower() not in ["none", "nan", "-"]:
+                match_price = re.match(r"^([\d\.]+)\s*(.*)$", raw_price)
+                if match_price:
+                    item["ราคา"] = float(match_price.group(1)) # แปลงเป็นตัวเลขเพียวๆ เพื่อให้ PDF เอาไปคำนวณได้
+                    
+                    # จัดระเบียบหน่วยเงินให้สวยงาม
+                    if match_price.group(2):
+                        currency = match_price.group(2).strip()
+                        if currency in ["บ.", "THB", "฿"]: # แปลงคำแปลกๆ ให้เป็น "บาท" ให้หมด
+                            currency = "บาท"
+                        item["หน่วยเงิน"] = currency
+                    else:
+                        item["หน่วยเงิน"] = "บาท" # ถ้ามีแต่เลข ไม่มีหน่วย ให้ใส่ "บาท" อัตโนมัติ
+
+            # --- 3. TheFuzz แก้คำผิดของชื่อวัสดุ ---
+            original_name = str(item.get("ชื่อวัสดุ", "")) or ""
+            item["suggestions"] = [] # เตรียมตัวเลือกไว้ให้หน้าบ้าน
+            
+            if original_name.strip():
+                # ดึง 3 อันดับแรกที่คะแนนเกิน 60%
+                matches = process.extract(original_name, STANDARD_MATERIALS, limit=3)
+                suggestions = [m[0] for m in matches if m[1] >= 60]
+                item["suggestions"] = suggestions
+                
+                best_match, score = matches[0]
+                if score == 100:
+                    item["สถานะ"] = "correct"
+                    item["หมายเหตุ"] = "✅ ถูกต้อง"
+                elif score >= 70:
+                    item["สถานะ"] = "warning"
+                    item["หมายเหตุ"] = f"❓ คล้ายกับ '{best_match}'"
+                else:
+                    item["สถานะ"] = "error"
+                    item["หมายเหตุ"] = "❌ ไม่พบในฐานข้อมูล"
+
+        print("✅ ประมวลผลสำเร็จ ส่ง JSON กลับไปที่หน้าเว็บ!")
+        return {"status": "success", "data": extracted_data}
 
     except Exception as e:
-        print(f"❌ Error ระหว่างประมวลผล: {e}")
+        print("❌ เกิดข้อผิดพลาด:", str(e))
         return {"status": "error", "message": str(e)}
-        
-    finally:
-        # กวาดบ้าน: ลบไฟล์ชั่วคราวทิ้งทุกครั้งที่ประมวลผลเสร็จ เพื่อไม่ให้รกเซิร์ฟเวอร์
-        if os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
-
-    print("✅ ประมวลผลสำเร็จและลบไฟล์ชั่วคราวแล้ว ส่ง JSON กลับไปที่หน้าเว็บ!")
-    
-    # ส่งข้อมูล JSON กลับไปให้ React 
-    return {
-        "status": "success",
-        "file_type": extension,
-        "data": extracted_data
-    }

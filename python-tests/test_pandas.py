@@ -2,13 +2,13 @@ import pandas as pd
 import re
 
 print("="*75)
-print("📊 เริ่มการทดสอบ Pandas (Best Practice: ส่งค่าว่างเป็น null เพื่อ Database)")
+print("📊 เริ่มการทดสอบ Pandas ")
 print("="*75)
 
 file_name = "../MockData/excel_MockData.xlsx"
 
 # =====================================================================
-# 2. ฟังก์ชันผ่าตัดแยก "ตัวเลข" และ "หน่วย" ด้วย Regex (เวอร์ชัน Best Practice)
+# 2. ฟังก์ชันผ่าตัดแยก "ตัวเลข" และ "หน่วย" ด้วย Regex 
 # =====================================================================
 def extract_value_and_unit(text):
     # ถ้าไม่มีข้อมูลเลย ให้คืนค่าเป็น None ทั้งตัวเลขและหน่วย
@@ -85,7 +85,7 @@ try:
     print("\n✅ เสร็จสมบูรณ์! ข้อมูลคลีน")
 
 except FileNotFoundError:
-    print(f"❌ Error: หาไฟล์ '{file_name}' ไม่เจอ! ลองเช็คตำแหน่งไฟล์ดูอีกครั้งนะครับ")
+    print(f"❌ Error: หาไฟล์ '{file_name}' ไม่เจอ! ลองเช็คตำแหน่งไฟล์ดูอีกครั้ง")
 except Exception as e:
     print(f"❌ Error: เกิดข้อผิดพลาด -> {e}")
 
