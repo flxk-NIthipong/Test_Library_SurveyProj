@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import axios from 'axios';
 import { PDFViewer, PDFDownloadLink } from '@react-pdf/renderer';
@@ -10,6 +10,41 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // =================================================================
+  // อ่าน job_id จาก URL และดึงข้อมูลจาก Python
+  // =================================================================
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const jobId = urlParams.get('job_id');
+
+    if (jobId) {
+      console.log("🔍 พบ Job ID จาก LINE:", jobId);
+      setLoading(true);
+      
+      // ยิง API ไปขอข้อมูลที่ Python เตรียมไว้
+      axios.get(`http://127.0.0.1:8000/api/get-job/${jobId}`)
+        .then(response => {
+          if (response.data.status === 'success') {
+            setData(response.data.data);
+          } else {
+            setError(response.data.message || "ไม่พบข้อมูลจาก LINE");
+          }
+        })
+        .catch(err => {
+          console.error("API Error:", err);
+          setError("ไม่สามารถดึงข้อมูลจาก Server ได้");
+        })
+        .finally(() => {
+          setLoading(false);
+          window.history.replaceState(null, '', window.location.pathname);
+        });
+    }
+  }, []); 
+
+
+  // =================================================================
+  // จัดการคำผิด
+  // =================================================================
   const handleSelectSuggestion = (index, newName) => {
     const newData = [...data];
     newData[index].ชื่อวัสดุ = newName;
@@ -17,6 +52,9 @@ function App() {
     setData(newData);
   };
 
+  // =================================================================
+  // อัปโหลดไฟล์แบบลากวาง
+  // =================================================================
   const onDrop = useCallback(async (acceptedFiles) => {
     const file = acceptedFiles[0];
     if (!file) return;
@@ -60,6 +98,13 @@ function App() {
     <div className="App" style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
       <h1 style={{ textAlign: 'center', color: '#1976d2' }}>🚀 ระบบสกัดข้อมูลวัสดุ</h1>
       
+      {/* แสดงข้อความ Error แจ้งเตือนถ้ามีปัญหา */}
+      {error && (
+        <div style={{ backgroundColor: '#ffebee', color: '#c62828', padding: '10px', borderRadius: '5px', marginBottom: '20px', textAlign: 'center' }}>
+          ❌ {error}
+        </div>
+      )}
+
       <div {...getRootProps()} style={{
         border: '2px dashed #1976d2',
         borderRadius: '10px',
