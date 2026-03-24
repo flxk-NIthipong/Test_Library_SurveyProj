@@ -25,10 +25,9 @@ import google.generativeai as genai
 load_dotenv()
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY")) # หรือใส่ API Key 
 
-LINE_CHANNEL_ACCESS_TOKEN = "iNAP4GtQHOasI1HoFXVKJ686jUmYPlO1oWWD2ZJqvtv/tCTBOE9ZxAv8wKGgd6aoa1h0kON9FnG0WhGJynJVVFhAcK3fTI3diRa4vk8eC9QaPdF7vSNUZqL/gvy07dIxqYBSU9cAXPsDLcKhWznUNAdB04t89/1O/w1cDnyilFU="
-LINE_CHANNEL_SECRET = "a8a5e4340bb5b569b980627bf91b1a4f"
-
-NGROK_URL = "https://256b-2405-9800-b900-31a0-4dea-bbc5-6eac-1e84.ngrok-free.app" 
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
+LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
+NGROK_URL = os.environ.get("NGROK_URL")
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
